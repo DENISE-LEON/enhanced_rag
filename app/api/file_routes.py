@@ -4,7 +4,7 @@ import json
 import shutil
 from pathlib import Path
 import pandas as pd
-from .core.dataManager import validate_file, input_docs, approved_docs, output_docs, process_file, migrate_approved_files
+from app.core.dataManager import validate_file, input_docs, approved_docs, output_docs, process_file
 
 app = FastAPI()
 
@@ -17,6 +17,10 @@ app.add_middleware(
 
 )
 
+@app.get("/")
+async def root():
+    return {"message": "Welcome to the File Validation API!"}
+
 @app.post("/validate")
 async def validate_endpoint(
     file: UploadFile = File(...), 
@@ -24,31 +28,29 @@ async def validate_endpoint(
     row_correction: str = Form(None),
     new_file_name: str = Form(None)
 ):
-    # 1. Parse the stringified JSON from React back into Python dictionaries
     parsed_mappings = json.loads(mappings) if mappings else None
     parsed_corrections = json.loads(row_correction) if row_correction else None
-    parse_new_file_name = json.loads(new_file_name) if new_file_name else None
 
-    # 2. Save the uploaded file temporarily so pandas can read it
+    new_name = new_file_name if new_file_name else file.filename
     input_docs.mkdir(parents=True, exist_ok=True)
-    file_path = input_docs / file.filename
+    file_path = input_docs / new_name
     
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    # 3. Read the file using Pandas to get headers and rows
     try:
         header, rows = process_file(file_path)
     except Exception as e:
         return {"status": "error", "error": f"Failed to read file: {str(e)}"}
 
-    # 4. Call your decoupled validation logic
-    result_dict = validate_file(file.filename, header, rows, parsed_mappings, parsed_corrections)
+    result_dict = validate_file(new_name, header, rows, parsed_mappings, parsed_corrections, new_file_name)
 
-    # 5. If successful, migrate the file directly from the router!
     if result_dict.get("status") == "success":
         approved_docs.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(file_path), str(approved_docs / file.filename))
+        final_file_name = result_dict.get("file_name", new_name)
+        
+        cleaned_df = pd.DataFrame(result_dict["rows"], columns=result_dict["header"])
+        cleaned_df.to_csv(approved_docs / final_file_name, index=False)
+        file_path.unlink(missing_ok=True) # Delete the original dirty file from input_docs
 
-    # 6. Return the dictionary back to React (whether it requires mapping, fixes, or success)
     return result_dict

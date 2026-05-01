@@ -20,46 +20,53 @@ REQUIRED_COLUMNS = [
 
 #file validation
 def validate_file(file_name, header, rows, mappings=None, row_correction=None, new_file_name=None):
+
+    if new_file_name:
+            file_name = new_file_name
+
+    team, month, year = extract_team_month_year(file_name)
+    if not team or not month or not year:
+        return {
+        "status": "requires valid _team_month_year", 
+        "error": "Filename must be in the format team_month_year.ext (e.g., sales_january_2024.csv)."
+        }
+
+
     if not header: 
         return {"status": "error", "error": "Missing header row."}
     
-    missing_columns = [col for col in REQUIRED_COLUMNS if col not in header]
 
-    # Only prompt for mappings if there are actually missing columns
+    actual_header = header
+    if mappings:
+        actual_header = [mappings.get(col, col) for col in header]
+
+    missing_columns = [col for col in REQUIRED_COLUMNS if col not in actual_header]    
     if missing_columns:
-        if mappings:
-            # Apply the mappings to the header
-            header = [mappings.get(col, col) for col in header]
-            
-            # Re-evaluate missing columns after mappings are applied
-            still_missing = [col for col in REQUIRED_COLUMNS if col not in header]
-            if still_missing:
-                return {"status": "error", "error": f"Mappings did not resolve all missing columns: {still_missing}"}
-        else:
-            # No mappings provided yet, tell React to ask the user
             return {
                 "status": "requires_mappings", 
                 "missing_columns": missing_columns,
-                "actual_columns": header
+                "actual_columns": actual_header
             }
     
 
     invalid_rows = []
-    # Keep track of the row index so React knows exactly which row needs fixing
     for index, row in enumerate(rows):
+        if row_correction and str(index) in row_correction:
+            corrections = row_correction[str(index)]
+            for col, new_val in corrections.items():
+                row[col] = new_val
+
         try:
             before = int(row["No of Records Before"])
             after = int(row["No of Records After"])
             expected_deleted = int(row["Expected Records Deleted"])
             actual_deleted = int(row["Actual Records Deleted"])
-            # Apply user corrections if they sent them back
+
             if row_correction and str(index) in row_correction:
                 corrections = row_correction[str(index)]
-                # Update the row with the user's typed corrections
                 for col, new_val in corrections.items():
                     row[col] = new_val
 
-            # Check if they are valid integers
             int(row["No of Records Before"])
             int(row["No of Records After"])
             int(row["Expected Records Deleted"])
@@ -68,8 +75,10 @@ def validate_file(file_name, header, rows, mappings=None, row_correction=None, n
         except ValueError:
             invalid_rows.append(row)
             # If it fails, capture the row data to send to React
+            # If it fails, capture the row data inside a single dictionary for React
             invalid_rows.append({
                 "rowIndex": index,
+                "rowData": row,
                 # For simplicity, we can ask them to check the whole row, or pinpoint columns later
                 "column": "Check integer columns" 
             })
@@ -81,10 +90,13 @@ def validate_file(file_name, header, rows, mappings=None, row_correction=None, n
             "invalid_rows": invalid_rows
         }
     
-    team, month, year = extract_team_month_year(file_name)
-    if not team or not month or not year:
-        return {"status": "requires valid _team_month_year", "error": "Filename must be in the format team_month_year.ext (e.g., sales_january_2024.csv)."}
-    return {"status": "success", "message": "File is valid and has been moved to approved documents."}
+    return {
+        "status": "success", 
+        "message": "File is valid and has been moved to approved documents.",
+        "file_name": file_name,
+        "header": header,
+        "rows": rows
+    }    
     
     #add a cleaner method for missing columns(incase user used a different name for the column), invalid data types(incase user spelled out integer), or empty cells.
 
@@ -118,7 +130,6 @@ def process_file(file_path):
     rows = df.to_dict("records")
     return header, rows
 
-#add helper method to load the data for reporting and analysis
 def load_data():
     files = list(approved_docs.glob("*"))
     if not files:
@@ -144,5 +155,4 @@ def gen_mismatch_report(groupBy):
         output_file = mismatch_reports/ f"mismatch_report_{group_value}.csv"
         group.to_csv(output_file, index = False)
     
-#notes
     
