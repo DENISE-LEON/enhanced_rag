@@ -64,17 +64,19 @@ async def validate_endpoint(
         final_file_name = result_dict.get("file_name", file_name)
         try:
             cleaned_df = pd.DataFrame(result_dict["rows"], columns=result_dict["header"])
-            cleaned_df.to_csv(approved_docs / final_file_name, index=False)
+            years = result_dict.get("file_year")
+            approved_years_dir = approved_docs / str(years)
+            approved_years_dir.mkdir(parents=True, exist_ok=True)
+            cleaned_df.to_csv(approved_years_dir / final_file_name, index=False)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed while writing approved file: {str(e)}")
 
-        if final_file_name != new_file_name or final_file_name != input_file.filename:
-            try:
-                file_path.unlink(missing_ok=True)
-                old_file_path.unlink(missing_ok=True)
-            except PermissionError as e:
-                raise HTTPException(status_code=500, detail=f"Failed to delete input file because it is in use: {str(e)}")
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Failed to delete input file: {str(e)}")
+        try:
+            file_path.unlink(missing_ok=True)
+            old_file_path.unlink(missing_ok=True)
+        except PermissionError as e:
+            raise HTTPException(status_code=500, detail=f"Failed to delete input file because it is in use: {str(e)}")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to delete input file: {str(e)}")
 
     return result_dict
